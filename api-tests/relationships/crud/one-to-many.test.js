@@ -96,7 +96,7 @@ const createReadData = async keystone => {
   );
 };
 
-multiAdapterRunners().map(({ runner, adapterName }) =>
+multiAdapterRunners('knex').map(({ runner, adapterName }) =>
   describe(`Adapter: ${adapterName}`, () => {
     // 1:1 relationships are symmetric in how they behave, but
     // are (in general) implemented in a non-symmetric way. For example,

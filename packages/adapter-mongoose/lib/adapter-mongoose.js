@@ -36,8 +36,9 @@ class MongooseAdapter extends BaseKeystoneAdapter {
     this._manyModels = {};
   }
 
-  async _connect({ name }) {
+  async _connect({ name, prisma }) {
     const { mongoUri, ...mongooseConfig } = this.config;
+    this.prisma = prisma
     // Default to the localhost instance
     let uri =
       mongoUri ||

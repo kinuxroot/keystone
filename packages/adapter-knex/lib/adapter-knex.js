@@ -70,6 +70,7 @@ class KnexAdapter extends BaseKeystoneAdapter {
     this.rels = rels;
     Object.values(this.listAdapters).forEach(listAdapter => {
       listAdapter._postConnect({ rels });
+      listAdapter.prisma = this.prisma;
     });
 
     if (!this.config.dropDatabase || process.env.NODE_ENV === 'production') {
@@ -213,6 +214,7 @@ class KnexAdapter extends BaseKeystoneAdapter {
 
   disconnect() {
     this.knex.destroy();
+    this.prisma.disconnect();
   }
 
   // This will drop all the tables in the backing database. Use wisely.
@@ -559,28 +561,107 @@ class KnexListAdapter extends BaseListAdapter {
   ////////// Queries //////////
 
   async _itemsQuery(args, { meta = false, from = {} } = {}) {
+    // console.log('QUERY');
+    // console.log(this);
+    const modelName = this.key.toLowerCase();
+    // console.log({ modelName, args, meta, from });
     const query = new QueryBuilder(this, args, { meta, from }).get();
     const results = await query;
 
+    const model = this.prisma[modelName];
+    // const prismaResult = await model.count(prismaFilter({ args, meta, from }));
+    const filter = prismaFilter({ args, meta, from });
+    // console.log({ filter });
+    let ret;
     if (meta) {
-      const { first, skip } = args;
-      const ret = results[0];
-      let count = ret.count;
-
-      // Adjust the count as appropriate
-      if (skip !== undefined) {
-        count -= skip;
-      }
-      if (first !== undefined) {
-        count = Math.min(count, first);
-      }
-      count = Math.max(0, count); // Don't want to go negative from a skip!
-      return { count };
+      ret = { count: await model.count(filter) };
+    } else {
+      ret = await model.findMany(filter);
     }
+    // console.log({ results });
+    // console.log({ ret });
+    return ret;
+    // console.log({ prismaResult });
+    // if (meta) {
+    //   const { first, skip } = args;
+    //   const ret = results[0];
+    //   let count = ret.count;
+
+    //   // Adjust the count as appropriate
+    //   if (skip !== undefined) {
+    //     count -= skip;
+    //   }
+    //   if (first !== undefined) {
+    //     count = Math.min(count, first);
+    //   }
+    //   count = Math.max(0, count); // Don't want to go negative from a skip!
+    //   return { count };
+    // }
 
     return results;
   }
 }
+
+const prismaFilter = ({ args, meta, from }) => {
+  const ret = {};
+  if (args.first) {
+    ret.take = args.first;
+  }
+  if (args.sortBy) {
+    const [foo, bar] = args.sortBy[0].split('_');
+    // console.log({ foo, bar });
+    ret.orderBy = { [foo]: bar.toLowerCase() };
+  }
+  if (args.where) {
+    const { where } = args;
+    // console.log({ where });
+    ret.where = {};
+    Object.entries(where).forEach(([k, v]) => {
+      // console.log({ k, v });
+      if (k === 'id') {
+        ret.where[k] = Number(v);
+      } else if (k === 'company') {
+        ret.where[k] = {};
+        Object.entries(v).forEach(([kk, vv]) => {
+          ret.where[k][kk.split('_')[0]] = { [kk.split('_')[1]]: vv };
+        });
+      } else if (k === 'locations_some') {
+        ret.where[k.split('_')[0]] = {};
+        Object.entries(v).forEach(([kk, vv]) => {
+          ret.where[k.split('_')[0]]['some'] = { [kk]: vv };
+        });
+      } else if (k === 'locations_none') {
+        ret.where[k.split('_')[0]] = {};
+        Object.entries(v).forEach(([kk, vv]) => {
+          ret.where[k.split('_')[0]]['none'] = { [kk]: vv };
+        });
+      } else if (k === 'locations_every') {
+        ret.where[k.split('_')[0]] = {};
+        Object.entries(v).forEach(([kk, vv]) => {
+          ret.where[k.split('_')[0]]['every'] = { [kk]: vv };
+        });
+      }
+    });
+
+    // ret.where = where;
+
+    // if (ret.where.id) {
+    //   ret.where.id = Number(ret.where.id);
+    // }
+    // console.log(ret.where);
+  }
+  if (from.fromId) {
+    if (!ret.where) {
+      ret.where = {};
+    }
+    const a = from.fromList.adapter.fieldAdaptersByPath[from.fromField];
+    const { columnName } = a.rel;
+    // console.log({ cardinality, tableName, columnName });
+    ret.where[columnName] = { id: Number(from.fromId) };
+  }
+
+  return ret;
+};
 
 class QueryBuilder {
   constructor(

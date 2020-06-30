@@ -110,10 +110,11 @@ export class Relationship extends Implementation {
       return {
         [this.path]: (item, _, context, info) => {
           // No ID set, so we return null for the value
-          if (!item[this.path]) {
+          const foo = item[`${this.path}Id`] ? `${this.path}Id` : this.path;
+          if (!item[foo]) {
             return null;
           }
-          const filteredQueryArgs = { where: { id: item[this.path].toString() } };
+          const filteredQueryArgs = { where: { id: item[foo].toString() } };
           // We do a full query to ensure things like access control are applied
           return refList
             .listQuery(filteredQueryArgs, context, refList.gqlNames.listQueryName, info)
@@ -212,7 +213,8 @@ export class Relationship extends Implementation {
         : [];
       currentValue = currentValue.map(({ id }) => id.toString());
     } else {
-      currentValue = item && item[this.path];
+      const foo = item &&item[`${this.path}Id`] ? `${this.path}Id` : this.path;
+      currentValue = item && item[foo];
       currentValue = currentValue && currentValue.toString();
     }
 

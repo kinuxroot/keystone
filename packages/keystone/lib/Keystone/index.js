@@ -520,10 +520,12 @@ module.exports = class Keystone {
    * @return Promise<any> the result of executing `onConnect` as passed to the
    * constructor, or `undefined` if no `onConnect` method specified.
    */
-  async connect() {
+  async connect(prismaClient) {
     const { adapters, name } = this;
     const rels = this._consolidateRelationships();
-    await resolveAllKeys(mapKeys(adapters, adapter => adapter.connect({ name, rels })));
+    // const prisma = new prismaClient.PrismaClient({ log: ['query'] });
+    const prisma = new prismaClient.PrismaClient();
+    await resolveAllKeys(mapKeys(adapters, adapter => adapter.connect({ name, rels, prisma })));
 
     // Now that the middlewares are done, and we're connected to the database,
     // it's safe to assume all the schemas are registered, so we can setup our
@@ -707,6 +709,106 @@ Please use keystone.executeGraphQL instead. See https://www.keystonejs.com/discu
           )
       )),
     ]).filter(middleware => !!middleware);
+  }
+
+  generatePrismaSchema() {
+    const rels = this._consolidateRelationships();
+    // console.log(rels);
+    // console.log(this.lists);
+
+    // const fields = [];
+    const foo = this.listsArray.map(list => {
+      // console.log(list.fields.filter(f => f.isRelationship));
+      const scalarFields = list.fields
+        .filter(f => !f.isRelationship)
+        .filter(f => f.path !== 'id')
+        .map(f => `${f.path}      String?`)
+        .filter(x => x);
+      const relFields = [
+        ...flatten(
+          list.fields
+            .filter(f => f.isRelationship)
+            .map(f => {
+              const r = rels.find(r => r.left === f || r.right === f);
+              // console.log({ r });
+              const isLeft = r.left === f;
+              // console.log({ isLeft });
+              if (r.cardinality === '1:N') {
+                if (isLeft) {
+                  return [
+                    `${f.path}    ${r.left.refListKey}[]    @relation("${r.tableName}${r.columnName}")`,
+                  ];
+                } else {
+                  return [
+                    `${f.path}    ${r.right.refListKey}?    @relation("${r.tableName}${r.columnName}", fields: [${r.columnName}Id], references: [id])`,
+                    `${f.path}Id  Int? @map("${r.columnName}")`,
+                  ];
+                }
+              } else if (r.cardinality === 'N:1') {
+                if (!isLeft) {
+                  return [
+                    `${f.path}    ${r.right.refListKey}[]    @relation("${r.tableName}${r.columnName}")`,
+                  ];
+                } else {
+                  return [
+                    `${f.path}    ${r.left.refListKey}?    @relation("${r.tableName}${r.columnName}", fields: [${r.columnName}Id], references: [id])`,
+                    `${f.path}Id  Int? @map("${r.columnName}")`,
+                  ];
+                }
+              }
+            })
+        ),
+      ];
+
+      const fields = [...scalarFields, ...relFields];
+      return `model ${list.key} {
+  id          Int      @id @default(autoincrement())
+  ${fields.join('\n  ')}
+}`;
+    });
+    const header = `datasource postgresql {
+  url      = env("DATABASE_URL")
+  provider = "postgresql"
+}
+generator client {
+  provider = "prisma-client-js"
+  output = "generated-client"
+}
+`;
+    // console.log(header + foo.join('\n'));
+    return header + foo.join('\n');
+
+    //     return `datasource postgresql {
+    //   url      = env("DATABASE_URL")
+    //   provider = "postgresql"
+    // }
+    // generator client {
+    //   provider = "prisma-client-js"
+    //   output = "generated-client"
+    // }
+    // model User {
+    //   id        Int      @id @default(autoincrement())
+    //   createdAt DateTime @default(now())
+    //   email     String   @unique
+    //   name      String?
+    //   role      Role     @default(USER)
+    //   posts     Post[]
+    // }
+    // model Post {
+    //   id        Int      @id @default(autoincrement())
+    //   createdAt DateTime @default(now())
+    //   updatedAt DateTime @updatedAt
+    //   published Boolean  @default(false)
+    //   title     String
+    //   author    User?    @relation(fields: [authorId], references: [id])
+    //   authorId  Int?
+    // }
+    // enum Role {
+    //   USER
+    //   ADMIN
+    //   OTHER
+    // }
+    // `;
   }
 
   async prepare({
